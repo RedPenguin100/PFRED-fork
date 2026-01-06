@@ -1,110 +1,162 @@
-# Get the base image
+# syntax=docker/dockerfile:1
 
-FROM scientificlinux/sl:6 as builder
+############################
+# 1) Builder
+############################
+FROM scientificlinux/sl:6 AS builder
 
-MAINTAINER Simone Sciabola <simone.sciabola@biogen.com>
+WORKDIR /home/pfred
+RUN mkdir -p /home/pfred/bin /tmp/src
 
-COPY sl6_repos/ /etc/yum.repos.d/
+# Working SL6.10 obsolete repos (OS + fastbugs + security)
+RUN rm -f /etc/yum.repos.d/*.repo && \
+  cat > /etc/yum.repos.d/sl6-obsolete.repo <<'EOF'
+[sl6-os]
+name=Scientific Linux 6.10 - OS (obsolete)
+baseurl=https://linux2.yz.yamagata-u.ac.jp/pub/Linux/scientific/obsolete/6.10/x86_64/os/
+enabled=1
+gpgcheck=0
+sslverify=0
+ip_resolve=4
 
-# Create pfred directory
+[sl6-fastbugs]
+name=Scientific Linux 6.10 - Fastbugs (obsolete)
+baseurl=https://linux2.yz.yamagata-u.ac.jp/pub/Linux/scientific/obsolete/6.10/x86_64/updates/fastbugs/
+enabled=1
+gpgcheck=0
+sslverify=0
+ip_resolve=4
 
-WORKDIR /home/pfred/
+[sl6-security]
+name=Scientific Linux 6.10 - Security (obsolete)
+baseurl=https://linux2.yz.yamagata-u.ac.jp/pub/Linux/scientific/obsolete/6.10/x86_64/updates/security/
+enabled=1
+gpgcheck=0
+sslverify=0
+ip_resolve=4
+EOF
 
-# Locate myself at home
+RUN yum -y clean all && yum -y makecache
 
-RUN cd /home && mkdir /home/pfred/bin
+RUN yum -y update && \
+    yum -y install \
+      ca-certificates \
+      curl \
+      wget \
+      gcc gcc-c++ gcc-gfortran \
+      python-devel \
+      readline-devel \
+      zlib-devel \
+      perl \
+      perl-DBI \
+      perl-DBD-mysql \
+      make \
+      tar \
+    && yum clean all
 
-# Install dependencies then clean up cache
+ENV PFRED_PREFIX=/home/pfred/bin
+ENV R_PREFIX=/home/pfred/bin/R2.6.0
+ENV PATH=/home/pfred/bin/R2.6.0/bin:$PATH
+ENV LD_LIBRARY_PATH=/home/pfred/bin/R2.6.0/lib64:/home/pfred/bin/R2.6.0/lib:$LD_LIBRARY_PATH
+ENV RHOMES=/home/pfred/bin/R2.6.0/lib64/R
+ENV PYTHONPATH=/home/pfred/bin/site-packages:/home/pfred/bin/site-packages/rpy:$PYTHONPATH
 
-RUN yum update
+WORKDIR /tmp/src
 
-RUN yum install -y perl \
-  wget \
-  gcc \
-  gcc-c++ \
-  gcc-gfortran \
-  python-devel \
-  readline-devel \
-  zlib-devel \
-  perl-DBI \
-  perl-DBD-mysql && \
-  yum clean all
+RUN curl -L -o numpy-1.4.1.tar.gz "https://sourceforge.net/projects/numpy/files/NumPy/1.4.1/numpy-1.4.1.tar.gz/download" && \
+    curl -L -o R-2.6.0.tar.gz "https://cran.r-project.org/src/base/R-2/R-2.6.0.tar.gz" && \
+    curl -L -o rpy-1.0.2.tar.gz "https://sourceforge.net/projects/rpy/files/rpy/1.0.2/rpy-1.0.2.tar.gz/download" && \
+    curl -L -o pls_2.1-0.tar.gz "https://cran.r-project.org/src/contrib/Archive/pls/pls_2.1-0.tar.gz" && \
+    curl -L -o randomForest_4.6-10.tar.gz "https://cran.r-project.org/src/contrib/Archive/randomForest/randomForest_4.6-10.tar.gz" && \
+    curl -L -o e1071_1.5-27.tar.gz "https://cran.r-project.org/src/contrib/Archive/e1071/e1071_1.5-27.tar.gz" && \
+    for f in *.tar.gz; do tar -xvf "$f"; done
 
-RUN cd /home/ && \
-  wget --no-check-certificate  https://sourceforge.net/projects/numpy/files/NumPy/1.4.1/numpy-1.4.1.tar.gz && \
-  wget --no-check-certificate  https://cran.r-project.org/src/base/R-2/R-2.6.0.tar.gz && \
-  wget --no-check-certificate  https://sourceforge.net/projects/rpy/files/rpy/1.0.2/rpy-1.0.2.tar.gz && \
-  for f in *.tar.gz; do tar -xvf "$f"; done && \
-  wget --no-check-certificate  https://cran.r-project.org/src/contrib/Archive/pls/pls_2.1-0.tar.gz && \
-  wget --no-check-certificate  https://cran.r-project.org/src/contrib/Archive/randomForest/randomForest_4.6-10.tar.gz && \
-  wget --no-check-certificate  https://cran.r-project.org/src/contrib/Archive/e1071/e1071_1.5-27.tar.gz && \
-  cd /home/numpy-1.4.1 && \
-  python setup.py build --fcompiler=gnu95 && python setup.py install --prefix=/home/pfred/bin/numpy && \
-  cd /home/R-2.6.0 && \
-  ./configure --prefix=/home/pfred/bin/R2.6.0 --enable-R-shlib --with-x=no && make && \
-  make check && make install
+RUN cd /tmp/src/numpy-1.4.1 && \
+    python setup.py build --fcompiler=gnu95 && \
+    python setup.py install --prefix=/home/pfred/bin/numpy
 
-# Library variables
+RUN cd /tmp/src/R-2.6.0 && \
+    ./configure --prefix=/home/pfred/bin/R2.6.0 --enable-R-shlib --with-x=no && \
+    make -j"$(nproc)" && \
+    make install
 
-RUN echo "export PATH=/home/pfred/bin/R2.6.0/bin:$PATH" >> ~/.bashrc && \
-  echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/pfred/bin/R2.6.0/bin" >> ~/.bashrc && \
-  echo "export RHOMES='/home/pfred/bin/R2.6.0/lib64/R'" >> ~/.bashrc && \
-  echo "export PYTHONPATH=/home/pfred/bin/site-packages:/home/pfred/bin/site-packages/rpy:$PYTHONPATH" >> ~/.bashrc
-
-# Download and install R packages: rpy, pls, rf, e1071
-
-RUN source ~/.bashrc && \
-  cd /home/rpy-1.0.2 && \
-  python setup.py install --prefix=/home/pfred/bin/rpy && \
-  cd /home/ && \
-  R CMD INSTALL pls_2.1-0.tar.gz && \
-  R CMD INSTALL randomForest_4.6-10.tar.gz && \
-  R CMD INSTALL e1071_1.5-27.tar.gz
+RUN cd /tmp/src/rpy-1.0.2 && \
+    python setup.py install --prefix=/home/pfred/bin/rpy && \
+    R CMD INSTALL /tmp/src/pls_2.1-0.tar.gz && \
+    R CMD INSTALL /tmp/src/randomForest_4.6-10.tar.gz && \
+    R CMD INSTALL /tmp/src/e1071_1.5-27.tar.gz
 
 WORKDIR /home/pfred/bin/site-packages
+RUN mkdir -p rpy && \
+    mv /home/pfred/bin/numpy/lib64/python2.6/site-packages/numpy . && \
+    mv /home/pfred/bin/rpy/lib64/python2.6/site-packages/* rpy && \
+    rm -rf /home/pfred/bin/numpy /home/pfred/bin/rpy
 
-RUN mkdir rpy
 
-RUN mv /home/pfred/bin/numpy/lib64/python2.6/site-packages/numpy . && \
-  mv /home/pfred/bin/rpy/lib64/python2.6/site-packages/* rpy && \
-  rm -rf /home/pfred/bin/{numpy,rpy}
+############################
+# 2) Runtime
+############################
+FROM scientificlinux/sl:6 AS pfredenv
 
-FROM scientificlinux/sl:6 as pfredenv
-COPY sl6_repos/ /etc/yum.repos.d/
+WORKDIR /home/pfred
 
-# Create pfred directory
+RUN rm -f /etc/yum.repos.d/*.repo && \
+  cat > /etc/yum.repos.d/sl6-obsolete.repo <<'EOF'
+[sl6-os]
+name=Scientific Linux 6.10 - OS (obsolete)
+baseurl=https://linux2.yz.yamagata-u.ac.jp/pub/Linux/scientific/obsolete/6.10/x86_64/os/
+enabled=1
+gpgcheck=0
+sslverify=0
+ip_resolve=4
 
-WORKDIR /home/pfred/
+[sl6-fastbugs]
+name=Scientific Linux 6.10 - Fastbugs (obsolete)
+baseurl=https://linux2.yz.yamagata-u.ac.jp/pub/Linux/scientific/obsolete/6.10/x86_64/updates/fastbugs/
+enabled=1
+gpgcheck=0
+sslverify=0
+ip_resolve=4
 
-# Install java using yum. TODO: Use yum remove to remove unnecessary dependencies
+[sl6-security]
+name=Scientific Linux 6.10 - Security (obsolete)
+baseurl=https://linux2.yz.yamagata-u.ac.jp/pub/Linux/scientific/obsolete/6.10/x86_64/updates/security/
+enabled=1
+gpgcheck=0
+sslverify=0
+ip_resolve=4
+EOF
 
-RUN yum install -y java perl perl-DBI perl-DBD-mysql wget libgfortran libXcomposite libXcursor libXi libXtst libXrandr alsa-lib mesa-libEGL libXdamage mesa-libGL libXScrnSaver && yum clean all
+RUN yum -y clean all && yum -y makecache
+
+RUN yum -y update && \
+    yum -y install \
+      ca-certificates \
+      java-1.8.0-openjdk \
+      perl perl-DBI perl-DBD-mysql \
+      wget \
+      libgfortran \
+      libXcomposite libXcursor libXi libXtst libXrandr \
+      alsa-lib mesa-libGL libXdamage libXScrnSaver \
+      curl \
+    && yum clean all
+
+ENV PFRED_PREFIX=/home/pfred/bin
+ENV R_PREFIX=/home/pfred/bin/R2.6.0
+ENV PATH=/home/pfred/bin/R2.6.0/bin:$PATH
+ENV LD_LIBRARY_PATH=/home/pfred/bin/R2.6.0/lib64:/home/pfred/bin/R2.6.0/lib:$LD_LIBRARY_PATH
+ENV RHOMES=/home/pfred/bin/R2.6.0/lib64/R
+ENV PYTHONPATH=/home/pfred/bin/site-packages:/home/pfred/bin/site-packages/rpy:$PYTHONPATH
 
 COPY --from=builder /home/pfred/bin /home/pfred/bin
-COPY --from=builder /root/.bashrc /root/.bashrc
 
-# Install python3 
+# Optional sanity check: verify R starts
+RUN R --version
 
-RUN cd /home/pfred/ && \
-    wget https://repo.anaconda.com/archive/Anaconda3-2021.05-Linux-x86_64.sh && \
-    bash Anaconda3-2021.05-Linux-x86_64.sh -b && \
-    rm -f Anaconda3-2021.05-Linux-x86_64.sh && \
-    echo "export PATH=/root/anaconda3/bin:$PATH" >> ~/.bashrc && \
-    source /root/.bashrc && \
-    conda install importlib_resources && \
-    conda install simplejson
-
-# Create the scripts and scratch directory
-
-RUN source /root/.bashrc && mkdir scripts scratch
-
-# Get libraries from github
+RUN mkdir -p scripts scratch
 
 COPY ./entrypoint.sh entrypoint.sh
-
 COPY ./setup_env.sh setup_env.sh
-
-RUN chmod a+x entrypoint.sh && chmod a+x setup_env.sh
+RUN chmod a+x entrypoint.sh setup_env.sh
 
 ENTRYPOINT ["./entrypoint.sh"]
-
