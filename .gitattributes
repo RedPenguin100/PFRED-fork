@@ -1,0 +1,6 @@
+# Set default behavior to handle all files as text and normalize to LF
+* text=auto
+
+# Explicitly force LF for shell scripts
+*.sh text eol=lf
+Dockerfile text eol=lf
