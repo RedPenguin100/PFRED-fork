@@ -7,9 +7,9 @@ SCRIPTS="pfred \
          ensemblapi \
          bowtie"
 
-BOWTIEL="a b c d e"
+BOWTIEL="a b c d"
 
-WEB=https://github.com/pfred/pfred-docker/releases/download/v1.0-alpha
+WEB=https://github.com/RedPenguin100/PFRED-fork/releases/download/v1.0-alpha
 
 echo "Setting up environment..."
 
